@@ -56,5 +56,8 @@ const GeoLayout cotmc_geo_0001A0[] = {
 };
 ```
 
+### Level script
+We're still not done! One more thing... change the line where `TERRAIN()` is (in the desired area, of course) to `<outputname>_collision` in `levels/<your level>/script.c` and change the previous name that there was to the new name in `header.h`.
+
 ### Notes
 This level exporter is very flexible. Although you will have to do a lot of things manually, you can import any \*.obj file.
