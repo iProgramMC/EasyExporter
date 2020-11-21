@@ -1,5 +1,5 @@
 # EasyExporter
-This is a level exporter. Requires SM64 decomp and a knowledge of how levels work.
+This is a level exporter for *Super Mario 64*. Requires SM64 decomp and a knowledge of how levels work.
 
 ## Warning
 If you do not know how a level is structured, please use Fast64 instead. This is meant as a more advanced version, and you will need to do a lot of stuff manually.
