@@ -61,3 +61,6 @@ We're still not done! One more thing... change the line where `TERRAIN()` is (in
 
 ### Notes
 This level exporter is very flexible. Although you will have to do a lot of things manually, you can import any \*.obj file.
+
+### Messed up UVs ingame?
+Seems like LIPID makes UV vertices that are really far away. Make sure that no UV vertices' positions go beyond the range `[-16,15]`.
