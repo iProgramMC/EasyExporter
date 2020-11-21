@@ -110,6 +110,7 @@ namespace ConsoleApp5
 
         static int GetPO2(int size)
         {
+            // todo: use log shit
             if (size > 1024) return 11;
             if (size > 512) return 10;
             if (size > 256) return 9;
