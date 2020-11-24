@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -110,7 +110,6 @@ namespace ConsoleApp5
 
         static int GetPO2(int size)
         {
-            // todo: use log shit
             if (size > 1024) return 11;
             if (size > 512) return 10;
             if (size > 256) return 9;
@@ -200,6 +199,11 @@ namespace ConsoleApp5
                 }
                 materials[curMat.name] = curMat;
             }
+        }
+
+        static bool IsInBound(float fx, float fy, float minx, float miny, float maxx, float maxy)
+        {
+            return !(fx < minx || fx > maxx || fy < miny || fy > maxy) ;
         }
 
         static string StringToGoodCName(string s)
@@ -415,12 +419,113 @@ namespace ConsoleApp5
                 for (int j = 0; j < 3; j++)
                 {
                     v[j] = vertices[f.v[j]];
-                    vt[j] = ConvertUVToFixed16b(f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]], f.mat.image.Width, f.mat.image.Height);
+                    //vt[j] = ConvertUVToFixed16b(f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]], f.mat.image.Width, f.mat.image.Height);
                     vn[j * 3 + 0] = (byte)(127 * (normalVertices[f.vn[j]]).n1);
                     vn[j * 3 + 1] = (byte)(127 * (normalVertices[f.vn[j]]).n2);
                     vn[j * 3 + 2] = (byte)(127 * (normalVertices[f.vn[j]]).n3);
+                }
+
+                // This is code that's designed to fix UV overflow on certain exporters.
+                int iterCount = 100000;
+                if (f.vt[0] == -1) // no texture?
+                {
+                    vt[0] = new VertexTexCoord16b();
+                    vt[1] = new VertexTexCoord16b();
+                    vt[2] = new VertexTexCoord16b();
+                    goto skipOverflowFix;
+                }
+
+                float minu = 999999, maxu = -999999, minv = 999999, maxv = -999999;
+                for (int j = 0; j < 3; j++)
+                {
+                    //if (IsInBound(texCoordVertices[f.vt[j]].u, texCoordVertices[f.vt[j]].v, minx, miny, maxx, maxy) {
+                    minu = Math.Min(minu, texCoordVertices[f.vt[j]].u);
+                    minv = Math.Min(minv, texCoordVertices[f.vt[j]].v);
+                    maxu = Math.Max(maxu, texCoordVertices[f.vt[j]].u);
+                    maxv = Math.Max(maxv, texCoordVertices[f.vt[j]].v);
+                    //}
+                }
+                float dx = Math.Abs(maxu - minu);
+                float dy = Math.Abs(maxv - minv);
+                if (dx + 4 >= f.mat.image.Width || dy + 4 >= f.mat.image.Height)
+                {
+                    Console.WriteLine("Error: uv overflow so big that it can't be fixed automatically. Please fix it yourself. Some faces might look weird.");
+                    goto skipOverflowFix;
+                }
+
+                float minx = -16 / (f.mat.image.Width / 32), miny = -16 / (f.mat.image.Height / 32);
+                float maxx =  15 / (f.mat.image.Width / 32), maxy =  15 / (f.mat.image.Height / 32);
+
+                bool firstIter = true;
+
+                int coordsThatNeedFixing = 0;//bitflag
+                do
+                {
+                    coordsThatNeedFixing = 0;
+                    for (int j = 0; j < 3; j++)
+                    {
+                        if (!IsInBound(texCoordVertices[f.vt[j]].u, texCoordVertices[f.vt[j]].v, minx, miny, maxx, maxy))
+                        {
+                            if (firstIter) Console.WriteLine("Warning: uv overflow present in your model. Fixed the face automatically. You might see this when working with LIPID OBJ exporter for sketchup, this is only because of the way the addon works.");
+                            coordsThatNeedFixing |= (1 << i);
+                            firstIter = false;
+                            //! check what this vert has done wrong. Moving by integers has no real effect on what the model looks like.
+                            if (texCoordVertices[f.vt[j]].u < minx)
+                            {
+                                float badu = texCoordVertices[f.vt[j]].u;
+                                for (int r = 0; r < 3; r++)
+                                {
+                                    texCoordVertices[f.vt[r]].u -= (float)Math.Floor(badu - minx);
+                                }
+                                iterCount--;
+                            }
+                            if (texCoordVertices[f.vt[j]].u > maxx)
+                            {
+                                float badu = texCoordVertices[f.vt[j]].u;
+                                for (int r = 0; r < 3; r++)
+                                {
+                                    texCoordVertices[f.vt[r]].u -= (float)Math.Ceiling(badu - maxx);
+                                }
+                                iterCount--;
+                            }
+                            if (texCoordVertices[f.vt[j]].v < miny)
+                            {
+                                float badv = texCoordVertices[f.vt[j]].v;
+                                for (int r = 0; r < 3; r++)
+                                {
+                                    texCoordVertices[f.vt[r]].v -= (float)Math.Floor(badv - miny);
+                                }
+                                iterCount--;
+                            }
+                            if (texCoordVertices[f.vt[j]].v > maxy)
+                            {
+                                float badv = texCoordVertices[f.vt[j]].v;
+                                for (int r = 0; r < 3; r++)
+                                {
+                                    texCoordVertices[f.vt[r]].v -= (float)Math.Ceiling(badv - maxy);
+                                }
+                                iterCount--;
+                            }
+                        }
+
+                    }
+
+                } while (coordsThatNeedFixing != 0 && iterCount > 0);
+                //goto fixedOverflowAlready;
+            skipOverflowFix:
+
+                if (iterCount <= 0)
+                {
+                    Console.WriteLine("Severe warning: trying to fix UV overflow resulted in an infinite loop. Please fix your model.");
+                }
+
+            //fixedOverflowAlready:
+                for (int j = 0; j < 3; j++)
+                {
+                    vt[j] = ConvertUVToFixed16b(f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]], f.mat.image.Width, f.mat.image.Height);
                     s += $"\t{{{{{{ {v[j].x * scale},{v[j].y * scale},{v[j].z * scale} }}, 0, {{ {vt[j].u},{vt[j].v} }}, {{ {vn[j * 3 + 0]},{vn[j * 3 + 1]},{vn[j * 3 + 2]},{0xff} }} }} }},\n";
                 }
+
                 f.cachedVInsideCode = vtxIndex;
                 vtxIndex += 3;
 
