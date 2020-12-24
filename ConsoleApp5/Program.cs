@@ -34,6 +34,9 @@ class Face
     public int[] v;
     public int[] vt;
     public int[] vn;
+
+    public float[] localU;
+    public float[] localV;
     public int cachedVInsideCode;
     public Material mat;
 }
@@ -145,6 +148,7 @@ namespace ConsoleApp5
                                 curMat.image.SetPixel(i % 32, i / 32, Color.White);
                             }
                         }
+                        if (materials.ContainsKey(curMat.name)) Console.WriteLine($"Warning: Material {curMat.name} already exists and was overridden.");
                         materials[curMat.name] = curMat;
                     }
                     curMat = new Material();
@@ -231,16 +235,43 @@ namespace ConsoleApp5
         static void Main(string[] args)
         {
             bool sketchupMode = false;
+            bool nuf = false;
             if (args.Length < 1)
             {
-                Console.WriteLine("usage: convert <your obj file> [-sum] [output name]");
+                Console.WriteLine("usage: convert <your obj file> [output name] [-sum] [-noscale] [-nuf]");
                 Console.WriteLine("   -sum: swaps the y and z axes (sketchup + lipid obj mode)");
+                Console.WriteLine("   -noscale: sets the scaling factor to 1");
+                Console.WriteLine("   -nuf: disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
                 return;
             }
             if (args.Contains("-sum"))
             {
                 Console.WriteLine("Activated Sketchup exporter mode.");
+
+                //add a new material named Layer_Layer0
+                Material curMatA = new Material()
+                {
+                    name = "Layer_Layer0",
+                    alphaChannel = false,
+                };
+                curMatA.image = new Bitmap(8, 8);
+                for (int i = 0; i < 8 * 8; i++)
+                {
+                    curMatA.image.SetPixel(i % 8, i / 8, Color.White);
+                }
+                materials["Layer_Layer0"] = curMatA;
+
                 sketchupMode = true;
+            }
+            if (args.Contains("-noscale"))
+            {
+                Console.WriteLine("Scaling factor set to 1.");
+                scale = 1;
+            }
+            if (args.Contains("-nuf"))
+            {
+                Console.WriteLine("Disabled UV overflow fixing.");
+                nuf = true;
             }
             string[] lines = File.ReadAllLines(args[0]);
             string curMat = "";
@@ -317,6 +348,7 @@ namespace ConsoleApp5
                             int[] v = new int[3];
                             int[] vt = new int[3];
                             int[] vn = new int[3];
+                            float[] localU = new float[3], localV = new float[3];
                             for (int i = 0; i < 3; i++)
                             {
                                 string[] subTokens = tokens[i+1].Split('/');
@@ -334,12 +366,18 @@ namespace ConsoleApp5
                                     case 2:
                                         // vertex tex coord
                                         v[i] = int.Parse(subTokens[0]) - 1;
-                                        if (subTokens[1] == "") vt[i] = -1; else vt[i] = int.Parse(subTokens[1]) - 1;
+                                        if (subTokens[1] == "")
+                                        { vt[i] = -1; localU[i] = 0; localV[i] = 0; }
+                                        else
+                                        { vt[i] = int.Parse(subTokens[1]) - 1; localU[i] = texCoordVertices[vt[i]].u; localV[i] = texCoordVertices[vt[i]].v; }
                                         break;
                                     case 3:
                                         // vertex coord
                                         v[i] = int.Parse(subTokens[0]) - 1;
-                                        if (subTokens[1] == "") vt[i] = -1; else vt[i] = int.Parse(subTokens[1]) - 1;
+                                        if (subTokens[1] == "")
+                                        { vt[i] = -1; localU[i] = 0; localV[i] = 0; }
+                                        else
+                                        { vt[i] = int.Parse(subTokens[1]) - 1; localU[i] = texCoordVertices[vt[i]].u; localV[i] = texCoordVertices[vt[i]].v; }
                                         vn[i] = int.Parse(subTokens[2]) - 1;
                                         break;
                                 }
@@ -348,7 +386,7 @@ namespace ConsoleApp5
                             {
                                 v = v,
                                 vn = vn,
-                                vt = vt,
+                                vt = vt,localU=localU,localV=localV,
                                 mat = materials[curMat]
                             };
                             faces.Add(f);
@@ -434,15 +472,17 @@ namespace ConsoleApp5
                     vt[2] = new VertexTexCoord16b();
                     goto skipOverflowFix;
                 }
+                //disabled UV overflow fix?
+                if (nuf) goto skipOverflowFix;
 
                 float minu = 999999, maxu = -999999, minv = 999999, maxv = -999999;
                 for (int j = 0; j < 3; j++)
                 {
-                    //if (IsInBound(texCoordVertices[f.vt[j]].u, texCoordVertices[f.vt[j]].v, minx, miny, maxx, maxy) {
-                    minu = Math.Min(minu, texCoordVertices[f.vt[j]].u);
-                    minv = Math.Min(minv, texCoordVertices[f.vt[j]].v);
-                    maxu = Math.Max(maxu, texCoordVertices[f.vt[j]].u);
-                    maxv = Math.Max(maxv, texCoordVertices[f.vt[j]].v);
+                    //if (IsInBound(f.localU[j], f.localV[j], minx, miny, maxx, maxy) {
+                    minu = Math.Min(minu, f.localU[j]);
+                    minv = Math.Min(minv, f.localV[j]);
+                    maxu = Math.Max(maxu, f.localU[j]);
+                    maxv = Math.Max(maxv, f.localV[j]);
                     //}
                 }
                 float dx = Math.Abs(maxu - minu);
@@ -453,8 +493,8 @@ namespace ConsoleApp5
                     goto skipOverflowFix;
                 }
 
-                float minx = -16 / (f.mat.image.Width / 32), miny = -16 / (f.mat.image.Height / 32);
-                float maxx =  15 / (f.mat.image.Width / 32), maxy =  15 / (f.mat.image.Height / 32);
+                float minx = -16 / (f.mat.image.Width / 32f), miny = -16 / (f.mat.image.Height / 32f);
+                float maxx =  15 / (f.mat.image.Width / 32f), maxy =  15 / (f.mat.image.Height / 32f);
 
                 bool firstIter = true;
 
@@ -464,45 +504,45 @@ namespace ConsoleApp5
                     coordsThatNeedFixing = 0;
                     for (int j = 0; j < 3; j++)
                     {
-                        if (!IsInBound(texCoordVertices[f.vt[j]].u, texCoordVertices[f.vt[j]].v, minx, miny, maxx, maxy))
+                        if (!IsInBound(f.localU[j], f.localV[j], minx, miny, maxx, maxy))
                         {
-                            if (firstIter) Console.WriteLine("Warning: uv overflow present in your model. Fixed the face automatically. You might see this when working with LIPID OBJ exporter for sketchup, this is only because of the way the addon works.");
+                            if (firstIter) Console.WriteLine("Warning: UV overflow present in your model. Fixed the face automatically. You might see this when working with LIPID OBJ exporter for sketchup, this is only because of the way the addon works.");
                             coordsThatNeedFixing |= (1 << i);
                             firstIter = false;
                             //! check what this vert has done wrong. Moving by integers has no real effect on what the model looks like.
-                            if (texCoordVertices[f.vt[j]].u < minx)
+                            if (f.localU[j] < minx)
                             {
-                                float badu = texCoordVertices[f.vt[j]].u;
+                                float badu = f.localU[j];
                                 for (int r = 0; r < 3; r++)
                                 {
-                                    texCoordVertices[f.vt[r]].u -= (float)Math.Floor(badu - minx);
+                                    f.localU[r] -= (float)Math.Floor(badu - minx);
                                 }
                                 iterCount--;
                             }
-                            if (texCoordVertices[f.vt[j]].u > maxx)
+                            if (f.localU[j] > maxx)
                             {
-                                float badu = texCoordVertices[f.vt[j]].u;
+                                float badu = f.localU[j];
                                 for (int r = 0; r < 3; r++)
                                 {
-                                    texCoordVertices[f.vt[r]].u -= (float)Math.Ceiling(badu - maxx);
+                                    f.localU[r] -= (float)Math.Ceiling(badu - maxx);
                                 }
                                 iterCount--;
                             }
-                            if (texCoordVertices[f.vt[j]].v < miny)
+                            if (f.localV[j] < miny)
                             {
-                                float badv = texCoordVertices[f.vt[j]].v;
+                                float badv = f.localV[j];
                                 for (int r = 0; r < 3; r++)
                                 {
-                                    texCoordVertices[f.vt[r]].v -= (float)Math.Floor(badv - miny);
+                                    f.localV[r] -= (float)Math.Floor(badv - miny);
                                 }
                                 iterCount--;
                             }
-                            if (texCoordVertices[f.vt[j]].v > maxy)
+                            if (f.localV[j] > maxy)
                             {
-                                float badv = texCoordVertices[f.vt[j]].v;
+                                float badv = f.localV[j];
                                 for (int r = 0; r < 3; r++)
                                 {
-                                    texCoordVertices[f.vt[r]].v -= (float)Math.Ceiling(badv - maxy);
+                                    f.localV[r] -= (float)Math.Ceiling(badv - maxy);
                                 }
                                 iterCount--;
                             }
@@ -539,6 +579,8 @@ namespace ConsoleApp5
                 */
                 //s += $"\t{{{{{{ {v.x * scale},{v.y * scale},{v.z * scale} }}, 0, {{ {vt.u},{vt.v} }}, {{ {vtn1},{vtn2},{vtn3},{0xff} }} }} }},\n";
             }
+			
+			//!TODO: move to using StringBuilder, makes it faster and abuses GC less
             s += "};\n\n";
             //List<string> displayListsToDraw = new List<string>();
             foreach (var materialKvp in materials)
