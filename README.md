@@ -13,7 +13,7 @@ This should generate a `convert.exe`. You can run it with the following argument
 
 **NOTE:** Your model **MUST** be triangulated. The tool will not triangulate the model.
 
-`-sum` stands for SketchUp Mode, which is actually a misnomer, as it's actually a mode for the LIPID OBJ exporter for SketchUp (This one automatically triangulates, so need to worry). It flips the Y and Z axes around, because LIPID didn't do it.
+`-sum` stands for SketchUp Mode, which is actually a misnomer, as it's actually a mode for the LIPID OBJ exporter for SketchUp (This one automatically triangulates, so no need to worry). It flips the Y and Z axes around, because LIPID didn't do it.
 
 The output name must be specified for `-sum` to work. It may only have characters from `A-Z`, `a-z`, `0-9` and `_` and may not start with a digit.
 
@@ -24,7 +24,7 @@ Afterwards, you will see a few new files:
 To replace a level with the newly created file, simply paste the contents into `levels/<your level>/areas/<your area>/collision.inc.c` and `levels/<your level>/areas/<your area>/1/model.inc.c` respectively. But don't build yet! There's more.
 
 ### Geo Layouts
-Usually, the exporter creates two display lists: `<output>_main_display_list_opaque` and `<output>_main_display_list_alpha`. Here's an example, which replaces CotMC with your custom level, and uses `output` as its name.
+Usually, the exporter creates two display lists: `<output>_main_display_list_opaque` and `<output>_main_display_list_alpha`. The way I use it usually is just replacing what the level geo draws to my stuff, and that's what I recommend. However, if you'd like to start from scratch, here's an example, which replaces CotMC with your custom level, and uses `output` as its name.
 ```c
 extern const Gfx output_main_display_list_opaque[];
 extern const Gfx output_main_display_list_alpha[];
