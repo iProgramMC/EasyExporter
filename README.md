@@ -9,11 +9,17 @@ This takes any \*.obj file and converts it into a usable format for decomp.
 
 ### How to import the levels
 This should generate a `convert.exe`. You can run it with the following arguments:
-`convert <your obj file> [output name = "output"] [-sum (defaults to false)]`
+`convert <your obj file> [output name = "output"] [-sum (defaults to false)] [-noscale (scale defaults to 100)] [-nuf (defaults to active)]`
 
 **NOTE:** Your model **MUST** be triangulated. The tool will not triangulate the model.
 
 `-sum` stands for SketchUp Mode, which is actually a misnomer, as it's actually a mode for the LIPID OBJ exporter for SketchUp (This one automatically triangulates, so no need to worry). It flips the Y and Z axes around, because LIPID didn't do it.
+
+`-nuf` stands for No UV Fix, which disables the UV fixer. If you ever encounter issues with the model because of UV overflow fixer, you can turn it off.
+
+`-noscale`.. You know what it does. If you made the model at the native SM64 scale (so 1 unit in your modelling program equals 1 unit in game) you can use this to keep the scaling native. 
+
+Note that if you have scaling that isn't 100 or 1, you will have to resize your model to be in one of these scaling. I might add a scale param soon, but I'm not sure.
 
 The output name must be specified for `-sum` to work. It may only have characters from `A-Z`, `a-z`, `0-9` and `_` and may not start with a digit.
 
