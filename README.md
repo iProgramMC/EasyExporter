@@ -1,6 +1,18 @@
 # EasyExporter
 This is a level exporter for *Super Mario 64*. Requires SM64 decomp and a knowledge of how levels work.
 
+## TODOs/Issues:
+- The model does not automatically triangulate models. If you have N-gons, the tool will always pick the first 3 vertices in the n-gon, as defined in the obj
+- Does not support other model formats
+- The tool does not support non-PoT textures
+- The tool does not like huge textures, it takes a long time to convert them to text
+- The tool does not resize images automatically to fit into the n64's constraints (to 64x32, for example)
+- No automatic level folder generation, although it might be coming soon
+- You have to edit collision stuff manually, which is kind of a pain
+
+### Note about this
+I might make a gui version of this tool at some point, if I have time, which fixes the last 2 issues
+
 ## Warning
 If you do not know how a level is structured, please use Fast64 instead. This is meant as a more advanced version, and you will need to do a lot of stuff manually.
 
