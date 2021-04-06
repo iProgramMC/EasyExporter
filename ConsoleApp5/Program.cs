@@ -58,7 +58,7 @@ namespace ConsoleApp5
     class Program
     {
         // Version 0.15
-        public const float version = 0.16f;
+        public const float version = 0.2f;
         static bool doSupportTextures = true;
         static int scale = 100;
 
@@ -234,20 +234,28 @@ namespace ConsoleApp5
         static void Main(string[] args)
         {
             bool sketchupMode = false;
-            bool nuf = false, fe = false;
+            bool nuf = false, fe = false, doNotOptimize = false;
+            Console.WriteLine($"EasyExporter V{version} (C) 2020-2021 iProgramInCpp");
+            Console.WriteLine("[!!BETA!!] This tool is beta-ware, so some stuff might not work correctly. If some faces aren't drawing properly, use \"-nop\".");
             if (args.Length < 1)
             {
-                Console.WriteLine("usage: convert <your obj file> [output name] [-sum] [-noscale] [-nuf]");
+                Console.WriteLine("usage: convert <your obj file> [output name] [-sum] [-noscale] [-nuf] [-nop] [-fe]");
                 Console.WriteLine("   -sum: swaps the y and z axes (sketchup + lipid obj mode)");
                 Console.WriteLine("   -noscale: sets the scaling factor to 1");
                 Console.WriteLine("   -nuf: disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
                 Console.WriteLine("   -fe:  a more extreme version of UV overflow fix; works on EVERY face instead of just the one that's oob and sets all of the weight points to near 0");
+                Console.WriteLine("   -nop: do not optimize the model (loads 3 vertices per triangle, is slower but more reliable)");
                 return;
             }
             if (args.Contains("-fe"))
             {
                 Console.WriteLine("UV Fix Extreme enabled.");
                 fe = true;
+            }
+            if (args.Contains("-nop"))
+            {
+                Console.WriteLine("Model is not being optimized.");
+                doNotOptimize = true;
             }
             if (args.Contains("-sum"))
             {
@@ -439,7 +447,7 @@ namespace ConsoleApp5
             string unlitMaterialNameShouldContain = "fence";
             bool evenMakeUnlitMatls = true;
             
-            string s = $"// Written by `convert' tool version {version} (C) 2020 iProgramInCpp.\n\nconst Collision {outName}_collision[] = {{";
+            string s = $"// Written by EasyExporter V{version} (C) 2020-2021 iProgramInCpp.\n\nconst Collision {outName}_collision[] = {{";
             s += $"\n\tCOL_INIT(),\n\tCOL_VERTEX_INIT({vertices.Count}),\n";
             foreach(Vertex v in vertices)
             {
@@ -466,7 +474,7 @@ namespace ConsoleApp5
 
 
             Console.WriteLine("Wrote collision of {0} verts and {1} tris, writing display list data...", vertices.Count, faces.Count);
-            s += $"// Written by `convert' tool version {version} (C) 2020 iProgramInCpp.\n\nstatic const Lights1 {outName}_lights = gdSPDefLights1(0x3f,0x3f,0x3f,0xff,0xff,0xff,0x28,0x28,0x28);\n";
+            s += $"// Written by EasyExporter V{version} (C) 2020-2021 iProgramInCpp.\n\nstatic const Lights1 {outName}_lights = gdSPDefLights1(0x3f,0x3f,0x3f,0xff,0xff,0xff,0x28,0x28,0x28);\n";
             s += $"static const Vtx {outName}_vertices[] = {{\n";
             int vtxIndex = 0;
             for (int i = 0; i < faces.Count; i++)
@@ -688,39 +696,49 @@ namespace ConsoleApp5
                 {
                     if (f.mat.name == materialKvp.Value.name)
                     {
-                        /*s += $"\tgsSPVertex(&{outName}_vertices[{f.cachedVInsideCode}], 3, 0),\n";
-                        s += $"\tgsSP1Triangle(0,1,2,0x0),\n";*/
-                        faceCount++;
-                        if (faceStart == -1) 
-                            faceStart = eeai;
+                        if (doNotOptimize)
+                        {
+                            s += $"\tgsSPVertex(&{outName}_vertices[{f.cachedVInsideCode}], 3, 0),\n";
+                            s += $"\tgsSP1Triangle(0,1,2,0x0),\n";
+                        }
+                        else
+                        {
+                            faceCount++;
+                            if (faceStart == -1)
+                                faceStart = eeai;
+                        }
                     }
                     eeai++;
                 }
 
-                if (faceStart != -1)
+                if (!doNotOptimize)
                 {
-                    int amountsOf5s = faceCount / 5;
-                    int leftover = faceCount % 5, i;
-                    for (i = 0; i < amountsOf5s; i++)
+                    if (faceStart != -1)
                     {
-                        Face first_face = faces[i * 5 + faceStart];
-                        s += $"\tgsSPVertex(&{outName}_vertices[{first_face.cachedVInsideCode}], 15, 0),\n";
-                        for (int j = 0; j < 5; j++)
+                        int amountsOf5s = faceCount / 5;
+                        int leftover = faceCount % 5, i;
+                        for (i = 0; i < amountsOf5s; i++)
+                        {
+                            Face first_face = faces[i * 5 + faceStart];
+                            s += $"\tgsSPVertex(&{outName}_vertices[{first_face.cachedVInsideCode}], 15, 0),\n";
+                            for (int j = 0; j < 5; j++)
+                            {
+                                Face f = faces[i * 5 + j + faceStart];
+                                s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
+                            }
+                        }
+                        Face first_face2 = faces[i * 5 + faceStart];
+                        s += $"\tgsSPVertex(&{outName}_vertices[{first_face2.cachedVInsideCode}], 15, 0),\n";
+                        for (int j = 0; j < leftover; j++)
                         {
                             Face f = faces[i * 5 + j + faceStart];
                             s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
                         }
                     }
-                    Face first_face2 = faces[i * 5 + faceStart];
-                    s += $"\tgsSPVertex(&{outName}_vertices[{first_face2.cachedVInsideCode}], 15, 0),\n";
-                    for (int j = 0; j < leftover; j++)
+                    else
                     {
-                        Face f = faces[i * 5 + j + faceStart];
-                        s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
+                        s += $"//! This is not drawing anything, please remove!!\t\n";
                     }
-                } else
-                {
-                    s += $"//! This is not drawing anything, please remove!!\t\n";
                 }
                 s += $"\t\n";
                 if (materialKvp.Key.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
