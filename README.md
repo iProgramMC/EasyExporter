@@ -23,11 +23,15 @@ This takes any \*.obj file and converts it into a usable format for decomp.
 This should generate a `convert.exe`. You can run it with the following arguments:
 `convert <your obj file> [output name = "output"] [-sum (defaults to false)] [-noscale (scale defaults to 100)] [-nuf (defaults to active)]`
 
+Example usage: `convert my_new_level.obj course -fe`. The tool will generate two files, `my_new_level.obj_outputCollision.inc.c` and `(..)outputModel.inc.c`.
+
 **NOTE:** Your model **MUST** be triangulated. The tool will not triangulate the model.
 
 `-sum` stands for SketchUp Mode, which is actually a misnomer, as it's actually a mode for the LIPID OBJ exporter for SketchUp (This one automatically triangulates, so no need to worry). It flips the Y and Z axes around, because LIPID didn't do it.
 
 `-nuf` stands for No UV Fix, which disables the UV fixer. If you ever encounter issues with the model because of UV overflow fixer, you can turn it off.
+
+`-fe` is the **recommended** option, pretty much always. Centers all the UV faces so that the median position is between the range of `[0, 1)` on both X and Y axes. This makes sure the output model looks just like the source model.
 
 `-noscale`.. You know what it does. If you made the model at the native SM64 scale (so 1 unit in your modelling program equals 1 unit in game) you can use this to keep the scaling native. 
 
