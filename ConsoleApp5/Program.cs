@@ -58,7 +58,7 @@ namespace ConsoleApp5
     class Program
     {
         // Version 0.15
-        public const float version = 0.15f;
+        public const float version = 0.16f;
         static bool doSupportTextures = true;
         static int scale = 100;
 
@@ -142,10 +142,10 @@ namespace ConsoleApp5
                     {
                         if (curMat.image == null)
                         {
-                            curMat.image = new Bitmap(32, 32);
-                            for (int i = 0; i < 32*32; i++)
+                            curMat.image = new Bitmap(8, 8);
+                            for (int i = 0; i < 8*8; i++)
                             {
-                                curMat.image.SetPixel(i % 32, i / 32, Color.White);
+                                curMat.image.SetPixel(i & 0x7, i >> 3, Color.White);//!optimizations pls
                             }
                         }
                         if (materials.ContainsKey(curMat.name)) Console.WriteLine($"Warning: Material {curMat.name} already exists and was overridden.");
@@ -157,29 +157,28 @@ namespace ConsoleApp5
                 else if (tokens[0].StartsWith("map_K") && tokens[0] != "map_Ks" /* dont include specular maps */ && curMat.image == null /* don't load the same img twice */ )
                 {
                     string fn ="";
-                    /*
-                    int m;
-                    m = matFileName.LastIndexOf("/");
-                    if (m == -1) {
-                        m = matFileName.LastIndexOf("\\");
-                        if (m == -1) m = 0;
-                    }
-                    fn = matFileName.Substring(0, m) + (m==0?"":"/") + tokens[1];*/
-                    fn = tokens[1]; // why overcomplicate yourself?
-                    curMat.image = new Bitmap(fn);
-                    bool alpha = false;
-                    // find if theres alpha in the image
-                    for (int i = 0; i < curMat.image.Width; i++)
+                    fn = tokens[1].Replace("\\\\", "\\"); //! Blender paths use \\ instead of one \ on window
+                    try
                     {
-                        for (int j = 0; j < curMat.image.Height; j++)
+                        curMat.image = new Bitmap(fn);
+                        bool alpha = false;
+                        // find if theres alpha in the image
+                        for (int i = 0; i < curMat.image.Width; i++)
                         {
-                            if (curMat.image.GetPixel(i,j).A < 255)
+                            for (int j = 0; j < curMat.image.Height; j++)
                             {
-                                alpha = true; break;
+                                if (curMat.image.GetPixel(i, j).A < 255)
+                                {
+                                    alpha = true; break;
+                                }
                             }
                         }
+                        curMat.alphaChannel = alpha;
+                    } catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error: Could not load texture {fn} referenced by material {curMat.name}: {ex.Message}. Aborting");
+                        Environment.Exit(1);
                     }
-                    curMat.alphaChannel = alpha;
                 }
                 else if (tokens[0] == "d")
                 {
@@ -235,14 +234,20 @@ namespace ConsoleApp5
         static void Main(string[] args)
         {
             bool sketchupMode = false;
-            bool nuf = false;
+            bool nuf = false, fe = false;
             if (args.Length < 1)
             {
                 Console.WriteLine("usage: convert <your obj file> [output name] [-sum] [-noscale] [-nuf]");
                 Console.WriteLine("   -sum: swaps the y and z axes (sketchup + lipid obj mode)");
                 Console.WriteLine("   -noscale: sets the scaling factor to 1");
                 Console.WriteLine("   -nuf: disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
+                Console.WriteLine("   -fe:  a more extreme version of UV overflow fix; works on EVERY face instead of just the one that's oob and sets all of the weight points to near 0");
                 return;
+            }
+            if (args.Contains("-fe"))
+            {
+                Console.WriteLine("UV Fix Extreme enabled.");
+                fe = true;
             }
             if (args.Contains("-sum"))
             {
@@ -271,6 +276,11 @@ namespace ConsoleApp5
             if (args.Contains("-nuf"))
             {
                 Console.WriteLine("Disabled UV overflow fixing.");
+                if (fe)
+                {
+                    fe = false;
+                    Console.WriteLine("Warning: -fe and -nuf switches both running at the same time, -nuf takes priority over -fe");
+                }
                 nuf = true;
             }
             string[] lines = File.ReadAllLines(args[0]);
@@ -370,6 +380,8 @@ namespace ConsoleApp5
                                         { vt[i] = -1; localU[i] = 0; localV[i] = 0; }
                                         else
                                         { vt[i] = int.Parse(subTokens[1]) - 1; localU[i] = texCoordVertices[vt[i]].u; localV[i] = texCoordVertices[vt[i]].v; }
+
+
                                         break;
                                     case 3:
                                         // vertex coord
@@ -382,14 +394,25 @@ namespace ConsoleApp5
                                         break;
                                 }
                             }
-                            Face f = new Face()
+                            Face f;
+                            try
                             {
-                                v = v,
-                                vn = vn,
-                                vt = vt,localU=localU,localV=localV,
-                                mat = materials[curMat]
-                            };
-                            faces.Add(f);
+                                f = new Face()
+                                {
+                                    v = v,
+                                    vn = vn,
+                                    vt = vt,
+                                    localU = localU,
+                                    localV = localV,
+                                    mat = materials[curMat]
+                                };
+                                faces.Add(f);
+                            }
+                            catch(Exception ex)
+                            {
+                                Console.WriteLine($"Error while creating display lists: {curMat} material does not exist or is bad.");
+                                Environment.Exit(1);
+                            }
                             break;
                         }
                     default:
@@ -412,6 +435,9 @@ namespace ConsoleApp5
             //faces.Sort(new Comparison<Face>(FaceCompareShit)); // makes it easier to clump things together
 
             //string curMatName = "";
+
+            string unlitMaterialNameShouldContain = "fence";
+            bool evenMakeUnlitMatls = true;
             
             string s = $"// Written by `convert' tool version {version} (C) 2020 iProgramInCpp.\n\nconst Collision {outName}_collision[] = {{";
             s += $"\n\tCOL_INIT(),\n\tCOL_VERTEX_INIT({vertices.Count}),\n";
@@ -461,6 +487,13 @@ namespace ConsoleApp5
                     vn[j * 3 + 0] = (byte)(127 * (normalVertices[f.vn[j]]).n1);
                     vn[j * 3 + 1] = (byte)(127 * (normalVertices[f.vn[j]]).n2);
                     vn[j * 3 + 2] = (byte)(127 * (normalVertices[f.vn[j]]).n3);
+                    //Console.WriteLine(curMat);
+                    if (f.mat.name.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
+                    {
+                        vn[j * 3 + 0] = 255;
+                        vn[j * 3 + 1] = 255;
+                        vn[j * 3 + 2] = 255;
+                    }
                 }
 
                 // This is code that's designed to fix UV overflow on certain exporters.
@@ -475,83 +508,112 @@ namespace ConsoleApp5
                 //disabled UV overflow fix?
                 if (nuf) goto skipOverflowFix;
 
-                float minu = 999999, maxu = -999999, minv = 999999, maxv = -999999;
-                for (int j = 0; j < 3; j++)
+                if (fe)
                 {
-                    //if (IsInBound(f.localU[j], f.localV[j], minx, miny, maxx, maxy) {
-                    minu = Math.Min(minu, f.localU[j]);
-                    minv = Math.Min(minv, f.localV[j]);
-                    maxu = Math.Max(maxu, f.localU[j]);
-                    maxv = Math.Max(maxv, f.localV[j]);
-                    //}
+                    // UV Fix Extreme
+                    float[] ue = new float[3], ve = new float[3];
+                    float avgU = 0, avgV = 0;
+                    for (int q = 0; q < 3; q++)
+                    {
+                        ue[q] = f.localU[q];
+                        ve[q] = f.localV[q];
+                        avgU += f.localU[q];
+                        avgV += f.localV[q];
+                        //f.localU[q] = (float)(f.localU[q] - Math.Floor(f.localU[q]));
+                        //f.localV[q] = (float)(f.localV[q] - Math.Floor(f.localV[q]));
+                    }
+                    avgU /= 3; avgV /= 3;
+                    float nAvgU = (float)(avgU - Math.Floor(avgU));
+                    float nAvgV = (float)(avgV - Math.Floor(avgV));
+                    //calculate delta
+                    float deltaU = nAvgU - avgU;
+                    float deltaV = nAvgV - avgV;
+                    for (int q = 0; q < 3; q++)
+                    {
+                        f.localU[q] += deltaU;
+                        f.localV[q] += deltaV;
+                    }
                 }
-                float dx = Math.Abs(maxu - minu);
-                float dy = Math.Abs(maxv - minv);
-                if (dx + 4 >= f.mat.image.Width || dy + 4 >= f.mat.image.Height)
+                else
                 {
-                    Console.WriteLine("Error: uv overflow so big that it can't be fixed automatically. Please fix it yourself. Some faces might look weird.");
-                    goto skipOverflowFix;
-                }
-
-                float minx = -16 / (f.mat.image.Width / 32f), miny = -16 / (f.mat.image.Height / 32f);
-                float maxx =  15 / (f.mat.image.Width / 32f), maxy =  15 / (f.mat.image.Height / 32f);
-
-                bool firstIter = true;
-
-                int coordsThatNeedFixing = 0;//bitflag
-                do
-                {
-                    coordsThatNeedFixing = 0;
+                    float minu = 999999, maxu = -999999, minv = 999999, maxv = -999999;
                     for (int j = 0; j < 3; j++)
                     {
-                        if (!IsInBound(f.localU[j], f.localV[j], minx, miny, maxx, maxy))
-                        {
-                            if (firstIter) Console.WriteLine("Warning: UV overflow present in your model. Fixed the face automatically. You might see this when working with LIPID OBJ exporter for sketchup, this is only because of the way the addon works.");
-                            coordsThatNeedFixing |= (1 << i);
-                            firstIter = false;
-                            //! check what this vert has done wrong. Moving by integers has no real effect on what the model looks like.
-                            if (f.localU[j] < minx)
-                            {
-                                float badu = f.localU[j];
-                                for (int r = 0; r < 3; r++)
-                                {
-                                    f.localU[r] -= (float)Math.Floor(badu - minx);
-                                }
-                                iterCount--;
-                            }
-                            if (f.localU[j] > maxx)
-                            {
-                                float badu = f.localU[j];
-                                for (int r = 0; r < 3; r++)
-                                {
-                                    f.localU[r] -= (float)Math.Ceiling(badu - maxx);
-                                }
-                                iterCount--;
-                            }
-                            if (f.localV[j] < miny)
-                            {
-                                float badv = f.localV[j];
-                                for (int r = 0; r < 3; r++)
-                                {
-                                    f.localV[r] -= (float)Math.Floor(badv - miny);
-                                }
-                                iterCount--;
-                            }
-                            if (f.localV[j] > maxy)
-                            {
-                                float badv = f.localV[j];
-                                for (int r = 0; r < 3; r++)
-                                {
-                                    f.localV[r] -= (float)Math.Ceiling(badv - maxy);
-                                }
-                                iterCount--;
-                            }
-                        }
-
+                        //if (IsInBound(f.localU[j], f.localV[j], minx, miny, maxx, maxy) {
+                        minu = Math.Min(minu, f.localU[j]);
+                        minv = Math.Min(minv, f.localV[j]);
+                        maxu = Math.Max(maxu, f.localU[j]);
+                        maxv = Math.Max(maxv, f.localV[j]);
+                        //}
+                    }
+                    float dx = Math.Abs(maxu - minu);
+                    float dy = Math.Abs(maxv - minv);
+                    if (dx + 4 >= f.mat.image.Width || dy + 4 >= f.mat.image.Height)
+                    {
+                        Console.WriteLine("Error: uv overflow so big that it can't be fixed automatically. Please fix it yourself. Some faces might look weird.");
+                        goto skipOverflowFix;
                     }
 
-                } while (coordsThatNeedFixing != 0 && iterCount > 0);
-                //goto fixedOverflowAlready;
+                    float minx = -16 / (f.mat.image.Width / 32f), miny = -16 / (f.mat.image.Height / 32f);
+                    float maxx = 15 / (f.mat.image.Width / 32f), maxy = 15 / (f.mat.image.Height / 32f);
+
+                    bool firstIter = true;
+
+                    int coordsThatNeedFixing = 0;//bitflag
+                    do
+                    {
+                        coordsThatNeedFixing = 0;
+                        for (int j = 0; j < 3; j++)
+                        {
+                            if (!IsInBound(f.localU[j], f.localV[j], minx, miny, maxx, maxy))
+                            {
+                                if (firstIter) Console.WriteLine("Warning: UV overflow present in your model. Fixed the face automatically. You might see this when working with LIPID OBJ exporter for sketchup, this is only because of the way the addon works.");
+                                coordsThatNeedFixing |= (1 << i);
+                                firstIter = false;
+                                //! check what this vert has done wrong. Moving by integers has no real effect on what the model looks like.
+                                if (f.localU[j] < minx)
+                                {
+                                    float badu = f.localU[j];
+                                    for (int r = 0; r < 3; r++)
+                                    {
+                                        f.localU[r] -= (float)Math.Floor(badu - minx);
+                                    }
+                                    iterCount--;
+                                }
+                                if (f.localU[j] > maxx)
+                                {
+                                    float badu = f.localU[j];
+                                    for (int r = 0; r < 3; r++)
+                                    {
+                                        f.localU[r] -= (float)Math.Ceiling(badu - maxx);
+                                    }
+                                    iterCount--;
+                                }
+                                if (f.localV[j] < miny)
+                                {
+                                    float badv = f.localV[j];
+                                    for (int r = 0; r < 3; r++)
+                                    {
+                                        f.localV[r] -= (float)Math.Floor(badv - miny);
+                                    }
+                                    iterCount--;
+                                }
+                                if (f.localV[j] > maxy)
+                                {
+                                    float badv = f.localV[j];
+                                    for (int r = 0; r < 3; r++)
+                                    {
+                                        f.localV[r] -= (float)Math.Ceiling(badv - maxy);
+                                    }
+                                    iterCount--;
+                                }
+                            }
+
+                        }
+
+                    } while (coordsThatNeedFixing != 0 && iterCount > 0);
+                    //goto fixedOverflowAlready;
+                }
             skipOverflowFix:
 
                 if (iterCount <= 0)
@@ -562,8 +624,14 @@ namespace ConsoleApp5
             //fixedOverflowAlready:
                 for (int j = 0; j < 3; j++)
                 {
-                    vt[j] = ConvertUVToFixed16b(f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]], f.mat.image.Width, f.mat.image.Height);
-                    s += $"\t{{{{{{ {v[j].x * scale},{v[j].y * scale},{v[j].z * scale} }}, 0, {{ {vt[j].u},{vt[j].v} }}, {{ {vn[j * 3 + 0]},{vn[j * 3 + 1]},{vn[j * 3 + 2]},{0xff} }} }} }},\n";
+                    VertexTexCoord vtc = new VertexTexCoord();
+                    if (f.vt[j] != -1)
+                    {
+                        vtc.u = f.localU[j];
+                        vtc.v = f.localV[j];
+                    }
+                    vt[j] = ConvertUVToFixed16b(vtc/*f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]]*/, f.mat.image.Width, f.mat.image.Height);
+                    s += $"\t{{{{{{ {v[j].x * scale},\t{v[j].y * scale},\t{v[j].z * scale}\t }}, 0, {{\t {vt[j].u},\t{vt[j].v} }}, {{ \t{vn[j * 3 + 0]},\t{vn[j * 3 + 1]},\t{vn[j * 3 + 2]},\t{0xff} }} }} }},\n";
                 }
 
                 f.cachedVInsideCode = vtxIndex;
@@ -590,9 +658,9 @@ namespace ConsoleApp5
                 // export texture
                 s += "ALIGNED8 const u16 " + goodMatName + "_txt[] = {\n\t";
                 for (int j = 0; j < materialKvp.Value.image.Height; j++) {
-                    for (int i = 0; i < materialKvp.Value.image.Width; i++)
+                    for (int e = 0; e < materialKvp.Value.image.Width; e++)
                     {
-                        s += $"{ColorToRGBA16(materialKvp.Value.image.GetPixel(i,j))}, ";
+                        s += $"{ColorToRGBA16(materialKvp.Value.image.GetPixel(e,j))}, ";
                     }
                 }
                 s += "\n};\n\n";
@@ -603,20 +671,64 @@ namespace ConsoleApp5
                 s += $"\tgsDPLoadBlock(G_TX_LOADTILE, 0, 0, {materialKvp.Value.image.Width} * {materialKvp.Value.image.Height} - 1, CALC_DXT({materialKvp.Value.image.Width}, G_IM_SIZ_16b_BYTES)),\n"; 
                 s += $"\tgsSPLight(&{outName}_lights.l, 1),\n"; 
                 s += $"\tgsSPLight(&{outName}_lights.a, 2),\n"; 
-                s += $"\t\n"; 
-                s += $"\t\n"; 
+                s += $"\t\n";
+                if (materialKvp.Key.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
+                {
+                    s += $"\tgsSPClearGeometryMode(G_CULL_BACK),\n";
+                    s += $"\tgsSPClearGeometryMode(G_LIGHTING),\n";
+                }
+                s += $"\t\n";
                 /*
                 s += $"\tgsDPSetTextureImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, {goodMatName}_txt),\n";
                 s += $"\tgsDPLoadSync(),\n";
                 s += $"\tgsDPLoadBlock(G_TX_LOADTILE, 0, 0, {materialKvp.Value.image.Width} * {materialKvp.Value.image.Height} - 1, CALC_DXT({materialKvp.Value.image.Width}, G_IM_SIZ_16b_BYTES)),\n";*/
+                int faceCount = 0;
+                int faceStart = -1, eeai = 0;
                 foreach(Face f in faces)
                 {
                     if (f.mat.name == materialKvp.Value.name)
                     {
-                        s += $"\tgsSPVertex(&{outName}_vertices[{f.cachedVInsideCode}], 3, 0),\n";
-                        s += $"\tgsSP1Triangle(0,1,2,0x0),\n";
+                        /*s += $"\tgsSPVertex(&{outName}_vertices[{f.cachedVInsideCode}], 3, 0),\n";
+                        s += $"\tgsSP1Triangle(0,1,2,0x0),\n";*/
+                        faceCount++;
+                        if (faceStart == -1) 
+                            faceStart = eeai;
                     }
+                    eeai++;
                 }
+
+                if (faceStart != -1)
+                {
+                    int amountsOf5s = faceCount / 5;
+                    int leftover = faceCount % 5, i;
+                    for (i = 0; i < amountsOf5s; i++)
+                    {
+                        Face first_face = faces[i * 5 + faceStart];
+                        s += $"\tgsSPVertex(&{outName}_vertices[{first_face.cachedVInsideCode}], 15, 0),\n";
+                        for (int j = 0; j < 5; j++)
+                        {
+                            Face f = faces[i * 5 + j + faceStart];
+                            s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
+                        }
+                    }
+                    Face first_face2 = faces[i * 5 + faceStart];
+                    s += $"\tgsSPVertex(&{outName}_vertices[{first_face2.cachedVInsideCode}], 15, 0),\n";
+                    for (int j = 0; j < leftover; j++)
+                    {
+                        Face f = faces[i * 5 + j + faceStart];
+                        s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
+                    }
+                } else
+                {
+                    s += $"//! This is not drawing anything, please remove!!\t\n";
+                }
+                s += $"\t\n";
+                if (materialKvp.Key.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
+                {
+                    s += $"\tgsSPSetGeometryMode(G_CULL_BACK),\n";
+                    s += $"\tgsSPSetGeometryMode(G_LIGHTING),\n";
+                }
+                s += $"\t\n";
                 s += $"\tgsSPEndDisplayList(),\n}};\n\n";
                 //displayListsToDraw.Add(outName + "_draw_" + goodMatName + "_txt");
             }
