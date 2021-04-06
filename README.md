@@ -82,11 +82,7 @@ const GeoLayout cotmc_geo_0001A0[] = {
 We're still not done! One more thing... change the line where `TERRAIN()` is (in the desired area, of course) to `<outputname>_collision` in `levels/<your level>/script.c` and change the previous name that there was to the new name in `header.h`.
 
 ### Notes
-This level exporter is very flexible. Although you will have to do a lot of things manually, you can import any \*.obj file.
+This level exporter is very flexible. Although you will have to do a lot of things manually, you can convert any \*.obj file into format for SM64.
 
 ### Messed up UVs ingame?
-Might be that LIPID makes UV vertices that are really far away. 
-##### If you aren't using Lipid
-Make sure that no UV vertices' positions go beyond the range `[-16,15]`.
-##### If you are
-Please import the model in Blender, then do the steps detailed above, and reexport (From Blender, of course)
+Try keeping the `-fe` switch on. If that doesn't work, you will have to work on fixing the model, sorry!
