@@ -1,7 +1,0 @@
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\bin\Debug\convert.exe.config
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\bin\Debug\convert.exe
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\bin\Debug\convert.pdb
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\obj\Debug\ConsoleApp5.csprojAssemblyReference.cache
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\obj\Debug\ConsoleApp5.csproj.CoreCompileInputs.cache
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\obj\Debug\convert.exe
-C:\Users\iProgramInCpp\source\repos\ConsoleApp5\ConsoleApp5\obj\Debug\convert.pdb
