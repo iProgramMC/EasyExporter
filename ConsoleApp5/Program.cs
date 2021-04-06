@@ -234,7 +234,7 @@ namespace ConsoleApp5
         static void Main(string[] args)
         {
             bool sketchupMode = false;
-            bool nuf = false, fe = false, doNotOptimize = false;
+            bool nuf = false, fe = true, doNotOptimize = false;
             Console.WriteLine($"EasyExporter V{version} (C) 2020-2021 iProgramInCpp");
             Console.WriteLine("[!!BETA!!] This tool is beta-ware, so some stuff might not work correctly. If some faces aren't drawing properly, use \"-nop\".");
             if (args.Length < 1)
@@ -242,15 +242,15 @@ namespace ConsoleApp5
                 Console.WriteLine("usage: convert <your obj file> [output name] [-sum] [-noscale] [-nuf] [-nop] [-fe]");
                 Console.WriteLine("   -sum: swaps the y and z axes (sketchup + lipid obj mode)");
                 Console.WriteLine("   -noscale: sets the scaling factor to 1");
-                Console.WriteLine("   -nuf: disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
-                Console.WriteLine("   -fe:  a more extreme version of UV overflow fix; works on EVERY face instead of just the one that's oob and sets all of the weight points to near 0");
-                Console.WriteLine("   -nop: do not optimize the model (loads 3 vertices per triangle, is slower but more reliable)");
+                Console.WriteLine("   -nuf:  disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
+                Console.WriteLine("   -nofe: disables the UV fixing automatically done by program, not recommended unless you know what you're doing!");
+                Console.WriteLine("   -nop:  do not optimize the model (loads 3 vertices per triangle, is slower but more reliable)");
                 return;
             }
-            if (args.Contains("-fe"))
+            if (args.Contains("-nofe"))
             {
-                Console.WriteLine("UV Fix Extreme enabled.");
-                fe = true;
+                Console.WriteLine("UV Fix Extreme disabled.");
+                fe = false;
             }
             if (args.Contains("-nop"))
             {
