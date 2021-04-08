@@ -62,6 +62,14 @@ namespace ConsoleApp5
         static bool doSupportTextures = true;
         static int scale = 100;
 
+        public static bool g_isVerbose = false;
+
+        public static void LogVerbose (string text)
+        {
+            if (g_isVerbose)
+                Console.WriteLine(text);
+        }
+
         static List<Vertex> vertices = new List<Vertex>();
         static List<VertexTexCoord> texCoordVertices = new List<VertexTexCoord>();
         static List<VertexNormal> normalVertices = new List<VertexNormal>();
@@ -242,10 +250,16 @@ namespace ConsoleApp5
                 Console.WriteLine("usage: convert <your obj file> [output name] [-sum] [-noscale] [-nuf] [-nop] [-fe]");
                 Console.WriteLine("   -sum: swaps the y and z axes (sketchup + lipid obj mode)");
                 Console.WriteLine("   -noscale: sets the scaling factor to 1");
+                Console.WriteLine("   -verbose: actively shows the progress of the app");
                 Console.WriteLine("   -nuf:  disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
                 Console.WriteLine("   -nofe: disables the UV fixing automatically done by program, not recommended unless you know what you're doing!");
                 Console.WriteLine("   -nop:  do not optimize the model (loads 3 vertices per triangle, is slower but more reliable)");
                 return;
+            }
+            if (args.Contains("-verbose"))
+            {
+                Console.WriteLine("Verbose log enabled.");
+                g_isVerbose = true;
             }
             if (args.Contains("-nofe"))
             {
@@ -260,6 +274,8 @@ namespace ConsoleApp5
             if (args.Contains("-sum"))
             {
                 Console.WriteLine("Activated Sketchup exporter mode.");
+
+                LogVerbose("Adding default Layer_Layer0 material, sometimes it's used and not implemented in the mtl file itself!!");
 
                 //add a new material named Layer_Layer0
                 Material curMatA = new Material()
@@ -303,6 +319,7 @@ namespace ConsoleApp5
                 switch (tokens[0])
                 {
                     case "mtllib": {
+                            LogVerbose($"Importing material library from \"{tokens[1]}\"");
                             ImportMaterial(tokens[1]);
                             break;
                         }
@@ -357,6 +374,7 @@ namespace ConsoleApp5
                         }
                     case "usemtl":
                         {
+                            LogVerbose("Switching material to " + tokens[1]);
                             curMat = tokens[1];
                             break;
                         }
@@ -456,6 +474,7 @@ namespace ConsoleApp5
 
             foreach (var v in materials)
             {
+                LogVerbose("Writing collision for " + v.Value.name + ".");
                 string s2 = ""; int mtlCnt = 0;
                 foreach (Face f in faces)
                 {
@@ -477,6 +496,7 @@ namespace ConsoleApp5
             s += $"// Written by EasyExporter V{version} (C) 2020-2021 iProgramInCpp.\n\nstatic const Lights1 {outName}_lights = gdSPDefLights1(0x3f,0x3f,0x3f,0xff,0xff,0xff,0x28,0x28,0x28);\n";
             s += $"static const Vtx {outName}_vertices[] = {{\n";
             int vtxIndex = 0;
+            LogVerbose("Writing vertex data...");
             for (int i = 0; i < faces.Count; i++)
             {
                 // Write each face as its own 3 vertexes
@@ -658,20 +678,36 @@ namespace ConsoleApp5
 			
 			//!TODO: move to using StringBuilder, makes it faster and abuses GC less
             s += "};\n\n";
+
+            LogVerbose("Separating each material used in the mesh into its own display list...");
+
             //List<string> displayListsToDraw = new List<string>();
             foreach (var materialKvp in materials)
             {
                 if (materialKvp.Value.image == null) continue; // color only isnt supported!
+                LogVerbose("Writing texture " + materialKvp.Value.name);
                 string goodMatName = StringToGoodCName(materialKvp.Key); // name
                 // export texture
+
+                int pixels_written = 0, total_pixels = materialKvp.Value.image.Height * materialKvp.Value.image.Width;
+
+                StringBuilder stringBuilder = new StringBuilder(8192);
                 s += "ALIGNED8 const u16 " + goodMatName + "_txt[] = {\n\t";
                 for (int j = 0; j < materialKvp.Value.image.Height; j++) {
                     for (int e = 0; e < materialKvp.Value.image.Width; e++)
                     {
-                        s += $"{ColorToRGBA16(materialKvp.Value.image.GetPixel(e,j))}, ";
+                        stringBuilder.Append($"{ColorToRGBA16(materialKvp.Value.image.GetPixel(e,j))}, ");
+                        pixels_written++;
                     }
+                    if (g_isVerbose)
+                        Console.Write($"\rWrote {pixels_written} pixels out of {total_pixels}.");
                 }
+                s += stringBuilder.ToString();
                 s += "\n};\n\n";
+                if (g_isVerbose)
+                    Console.WriteLine();
+
+                LogVerbose("Writing display list for the material...");
 
                 s += $"static const Gfx {outName}_draw_{goodMatName}_txt[] = {{\n"; 
                 s += $"\tgsDPSetTextureImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, {goodMatName}_txt),\n"; 
@@ -774,6 +810,9 @@ namespace ConsoleApp5
             s += $"\tgsSPEndDisplayList(),\n";
             s += "};";*/
             // using Fast 64 method
+
+            LogVerbose("Done writing material DLs, writing main DL that unites them all together");
+
             s += $"const Gfx {outName}_main_display_list_opaque[] = {{\n";
             s += $"\tgsDPPipeSync(),\n";
             s += $"\tgsDPSetCombineMode(G_CC_MODULATERGB, G_CC_MODULATERGB),\n";
