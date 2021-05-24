@@ -1,5 +1,6 @@
 # EasyExporter
 This is a level exporter for *Super Mario 64*. Requires SM64 decomp and a knowledge of how levels work.
+**NOTE**: This is not as easy as the title says. I decided to keep it because it would break existing links, though.
 
 ## TODOs/Issues:
 - The model does not automatically triangulate models. If you have N-gons, the tool will always pick the first 3 vertices in the n-gon, as defined in the obj
