@@ -60,7 +60,7 @@ namespace ConsoleApp5
         // Version 0.15
         public const float version = 0.2f;
         static bool doSupportTextures = true;
-        static int scale = 100;
+        static float scale = 100;
 
         public static bool g_isVerbose = false;
 
@@ -254,6 +254,7 @@ namespace ConsoleApp5
                 Console.WriteLine("   -nuf:  disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
                 Console.WriteLine("   -nofe: disables the UV fixing automatically done by program, not recommended unless you know what you're doing!");
                 Console.WriteLine("   -nop:  do not optimize the model (loads 3 vertices per triangle, is slower but more reliable)");
+                Console.WriteLine("   -f64s: sets the scale to 212.77, the default Fast64 scaling. Useful for using Fast64 scaled models.");
                 return;
             }
             if (args.Contains("-verbose"))
@@ -296,6 +297,11 @@ namespace ConsoleApp5
             {
                 Console.WriteLine("Scaling factor set to 1.");
                 scale = 1;
+            }
+            if (args.Contains("-f64s"))
+            {
+                Console.WriteLine("Scaling factor set to 212.77f. (default fast64 scale)");
+                scale = 212.77f;
             }
             if (args.Contains("-nuf"))
             {
