@@ -6,10 +6,12 @@ using System.IO;
 using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Globalization;
 
 class Vertex
 {
     public float x, y, z;
+    public int r = 255, g = 255, b = 255;
 }
 class VertexTexCoord
 {
@@ -40,12 +42,31 @@ class Face
     public int cachedVInsideCode;
     public Material mat;
 }
+class Light
+{
+    public int ambR =  63, ambG =  63, ambB =  63, 
+               difR = 255, difG = 255, difB = 255, 
+               dirX = 40, dirY = 40, dirZ = 40;
+
+    public void Set(int r, int g, int b)
+    {
+        difR = r; difG = g; difB = b;
+        ambR = difR >> 2;
+        ambG = difG >> 2;
+        ambB = difB >> 2;
+    }
+    public void SetDir(int x, int y, int z)
+    {
+        dirX = x; dirY = y; dirZ = z;
+    }
+}
 class Material
 {
     public string name = "";
     public Bitmap image = null;
     public float opacity = 1; // todo
     public bool alphaChannel = false;
+    public int lightIndex = 0;
 }
 class MaterialKVP
 {
@@ -60,11 +81,11 @@ namespace ConsoleApp5
         // Version 0.15
         public const float version = 0.2f;
         static bool doSupportTextures = true;
-        static float scale = 100;
+        static int scale = 100;
 
         public static bool g_isVerbose = false;
 
-        public static void LogVerbose (string text)
+        public static void LogVerbose(string text)
         {
             if (g_isVerbose)
                 Console.WriteLine(text);
@@ -75,7 +96,10 @@ namespace ConsoleApp5
         static List<VertexNormal> normalVertices = new List<VertexNormal>();
         static List<Face> faces = new List<Face>();
         static Dictionary<string, Material> materials = new Dictionary<string, Material>();
-        
+        static List<Light> lights = new List<Light>();
+        static Dictionary<int, int> colorToLightIndex = new Dictionary<int, int>();
+        static int LX = 40, LY = 40, LZ = 40;
+
         static int StrCmp(string a, string b)
         {
             if (a.Length != b.Length)
@@ -110,13 +134,41 @@ namespace ConsoleApp5
             value *= two5x;
             return (Int16)Math.Round(Math.Min(Math.Max(value, -two15x), two15x - 1));
         }
-        static VertexTexCoord16b ConvertUVToFixed16b(VertexTexCoord c, int tw, int th)
+        static VertexTexCoord16b ConvertUVToFixed16b(VertexTexCoord c, int tw, int th, bool precise)
         {
             return new VertexTexCoord16b()
             {
-                u = FloatToFixed16b(c.u * tw),
-                v = FloatToFixed16b(c.v * th),
+                u = FloatToFixed16b((c.u * tw)-(precise?1:0)),
+                v = FloatToFixed16b((c.v * th)-(precise?1:0)),
             };
+        }
+
+        static void ReadVertexColorFile(string filename)
+        {
+            string[] lines = File.ReadAllLines(filename);
+            foreach (string line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line.StartsWith("//")) continue;
+                if (line.StartsWith("#")) continue;
+                string[] tokens = line.Split('|');
+                if (tokens.Length < 1) continue; // safety
+                if (tokens[0] == "vertex_color")
+                {
+                    if (tokens.Length >= 5)
+                    {
+                        int index = int.Parse(tokens[1]);
+                        float rf = float.Parse(tokens[2], NumberStyles.Float, CultureInfo.InvariantCulture);
+                        float gf = float.Parse(tokens[3], NumberStyles.Float, CultureInfo.InvariantCulture);
+                        float bf = float.Parse(tokens[4], NumberStyles.Float, CultureInfo.InvariantCulture);
+
+                        int r = (int)(rf * 255), g = (int)(gf * 255), b = (int)(bf * 255);
+                        vertices[index].r = r;
+                        vertices[index].g = g;
+                        vertices[index].b = b;
+                    }
+                }
+            }
         }
 
         static int GetPO2(int size)
@@ -139,7 +191,8 @@ namespace ConsoleApp5
         {
             string[] lines = File.ReadAllLines(matFileName);
             Material curMat = null;
-            foreach(string line in lines) {
+            foreach (string line in lines)
+            {
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 if (line.StartsWith("#")) continue;
                 string[] tokens = line.Split(' ');
@@ -150,10 +203,10 @@ namespace ConsoleApp5
                     {
                         if (curMat.image == null)
                         {
-                            curMat.image = new Bitmap(8, 8);
-                            for (int i = 0; i < 8*8; i++)
+                            curMat.image = new Bitmap(2, 2);
+                            for (int i = 0; i < 2 * 2; i++)
                             {
-                                curMat.image.SetPixel(i & 0x7, i >> 3, Color.White);//!optimizations pls
+                                curMat.image.SetPixel(i & 0x1, i >> 1, Color.White);//!optimizations pls
                             }
                         }
                         if (materials.ContainsKey(curMat.name)) Console.WriteLine($"Warning: Material {curMat.name} already exists and was overridden.");
@@ -164,7 +217,7 @@ namespace ConsoleApp5
                 }
                 else if (tokens[0].StartsWith("map_K") && tokens[0] != "map_Ks" /* dont include specular maps */ && curMat.image == null /* don't load the same img twice */ )
                 {
-                    string fn ="";
+                    string fn = "";
                     fn = tokens[1].Replace("\\\\", "\\"); //! Blender paths use \\ instead of one \ on window
                     try
                     {
@@ -182,7 +235,8 @@ namespace ConsoleApp5
                             }
                         }
                         curMat.alphaChannel = alpha;
-                    } catch (Exception ex)
+                    }
+                    catch (Exception ex)
                     {
                         Console.WriteLine($"Error: Could not load texture {fn} referenced by material {curMat.name}: {ex.Message}. Aborting");
                         Environment.Exit(1);
@@ -190,11 +244,29 @@ namespace ConsoleApp5
                 }
                 else if (tokens[0] == "d")
                 {
-                    curMat.opacity = float.Parse(tokens[1], System.Globalization.CultureInfo.InvariantCulture);
+                    curMat.opacity = float.Parse(tokens[1], CultureInfo.InvariantCulture);
+                }
+                else if (tokens[0] == "Kd")
+                {
+                    float rf = float.Parse(tokens[1], CultureInfo.InvariantCulture);
+                    float gf = float.Parse(tokens[2], CultureInfo.InvariantCulture);
+                    float bf = float.Parse(tokens[3], CultureInfo.InvariantCulture);
+                    int r = (int)(rf * 255), g = (int)(gf * 255), b = (int)(bf * 255);
+
+                    int idn = r << 16 | g << 8 | b;
+                    if (!colorToLightIndex.ContainsKey(idn))
+                    {
+                        colorToLightIndex[idn] = lights.Count;
+                        Light n = new Light();
+                        n.SetDir(LX, LY, LZ);
+                        n.Set   (r,  g,  b);
+                        lights.Add(n);
+                    }
+                    curMat.lightIndex = colorToLightIndex[idn];
                 }
                 else if (tokens[0] == "Tr")
                 {
-                    curMat.opacity = 1F - float.Parse(tokens[1], System.Globalization.CultureInfo.InvariantCulture);
+                    curMat.opacity = 1F - float.Parse(tokens[1], CultureInfo.InvariantCulture);
                 }
             }
             // push last material
@@ -202,10 +274,10 @@ namespace ConsoleApp5
             {
                 if (curMat.image == null)
                 {
-                    curMat.image = new Bitmap(32, 32);
-                    for (int i = 0; i < 32 * 32; i++)
+                    curMat.image = new Bitmap(2, 2);
+                    for (int i = 0; i < 2 * 2; i++)
                     {
-                        curMat.image.SetPixel(i % 32, i / 32, Color.White);
+                        curMat.image.SetPixel(i % 2, i / 2, Color.White);
                     }
                 }
                 materials[curMat.name] = curMat;
@@ -214,7 +286,7 @@ namespace ConsoleApp5
 
         static bool IsInBound(float fx, float fy, float minx, float miny, float maxx, float maxy)
         {
-            return !(fx < minx || fx > maxx || fy < miny || fy > maxy) ;
+            return !(fx < minx || fx > maxx || fy < miny || fy > maxy);
         }
 
         static string StringToGoodCName(string s)
@@ -229,6 +301,14 @@ namespace ConsoleApp5
             return s;
         }
 
+        static bool DoesStringContainAnyOfTheseSubstrings(string mainStr, string[] substrs)
+        {
+            string h = mainStr.ToLower();
+            foreach (string substr in substrs)
+                if (h.Contains(substr)) return true;
+            return false;
+        }
+
         static UInt16 ColorToRGBA16(Color c)
         {
             // 5R 5G 5B 1A
@@ -238,11 +318,22 @@ namespace ConsoleApp5
             int a = c.A >> 7;
             return (ushort)(r << 11 | g << 6 | b << 1 | a);
         }
+        
+        static UInt16 ColorToIA16(Color c)
+        {
+            // 5R 5G 5B 1A
+            //average
+            int i = c.R;
+            //int i = (c.R + c.B + c.G) / 3;
+            int a = c.A;
+            return (ushort)(i << 8 | a);
+        }
 
         static void Main(string[] args)
         {
             bool sketchupMode = false;
-            bool nuf = false, fe = true, doNotOptimize = false;
+            bool nuf = false, fe = true, doNotOptimize = false, precise = false;
+            string vertexColorFileName = "";
             Console.WriteLine($"EasyExporter V{version} (C) 2020-2021 iProgramInCpp");
             Console.WriteLine("[!!BETA!!] This tool is beta-ware, so some stuff might not work correctly. If some faces aren't drawing properly, use \"-nop\".");
             if (args.Length < 1)
@@ -254,8 +345,22 @@ namespace ConsoleApp5
                 Console.WriteLine("   -nuf:  disables fixing UV overflow (experimental). Use this if you're sure you don't have UV overflow in your model, or if the UV overflow fix fails.");
                 Console.WriteLine("   -nofe: disables the UV fixing automatically done by program, not recommended unless you know what you're doing!");
                 Console.WriteLine("   -nop:  do not optimize the model (loads 3 vertices per triangle, is slower but more reliable)");
-                Console.WriteLine("   -f64s: sets the scale to 212.77, the default Fast64 scaling. Useful for using Fast64 scaled models.");
+                Console.WriteLine("   -prec: avoid seams in model mesh (will do 0-990 instead of 0-1024 in terms of UV coordinates going from 0 to 1)");
+                Console.WriteLine("   -vtxf=<filename>: Since OBJ doesn't support vertex colors, use the bpy tool provided to specify vertex colors using this switch.");
                 return;
+            }
+            foreach (string arg in args)
+            {
+                if (arg.StartsWith("-vtxf="))
+                {
+                    vertexColorFileName = arg.Substring("-vtxf=".Length);
+                    Console.WriteLine("Using vertex colors located at : " + vertexColorFileName);
+                }
+            }
+            if (args.Contains("-prec"))
+            {
+                Console.WriteLine("Texture precision enabled");
+                precise = true;
             }
             if (args.Contains("-verbose"))
             {
@@ -298,11 +403,6 @@ namespace ConsoleApp5
                 Console.WriteLine("Scaling factor set to 1.");
                 scale = 1;
             }
-            if (args.Contains("-f64s"))
-            {
-                Console.WriteLine("Scaling factor set to 212.77f. (default fast64 scale)");
-                scale = 212.77f;
-            }
             if (args.Contains("-nuf"))
             {
                 Console.WriteLine("Disabled UV overflow fixing.");
@@ -324,7 +424,8 @@ namespace ConsoleApp5
                 if (tokens.Length < 1) continue; // safety
                 switch (tokens[0])
                 {
-                    case "mtllib": {
+                    case "mtllib":
+                        {
                             LogVerbose($"Importing material library from \"{tokens[1]}\"");
                             ImportMaterial(tokens[1]);
                             break;
@@ -334,9 +435,9 @@ namespace ConsoleApp5
                             // Add Vertex
                             Vertex vtx = new Vertex()
                             {
-                                x = float.Parse(tokens[1], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
-                                y = float.Parse(tokens[2], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
-                                z = float.Parse(tokens[3], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
+                                x = float.Parse(tokens[1], CultureInfo.InvariantCulture), // always a dot, never comma
+                                y = float.Parse(tokens[2], CultureInfo.InvariantCulture), // always a dot, never comma
+                                z = float.Parse(tokens[3], CultureInfo.InvariantCulture), // always a dot, never comma
                             };
                             if (sketchupMode)
                             {
@@ -353,8 +454,8 @@ namespace ConsoleApp5
                             // Add Vertex Texture Coordinate
                             VertexTexCoord vtx = new VertexTexCoord()
                             {
-                                u = float.Parse(tokens[1], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
-                                v = 1-float.Parse(tokens[2], System.Globalization.CultureInfo.InvariantCulture), // N64 requires this :)
+                                u = float.Parse(tokens[1], CultureInfo.InvariantCulture), // always a dot, never comma
+                                v = 1 - float.Parse(tokens[2], CultureInfo.InvariantCulture), // N64 requires this :)
                             };
                             texCoordVertices.Add(vtx);
                             break;
@@ -364,9 +465,9 @@ namespace ConsoleApp5
                             // Add Vertex Normal Coordinate
                             VertexNormal vtx = new VertexNormal()
                             {
-                                n1 = float.Parse(tokens[1], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
-                                n2 = float.Parse(tokens[2], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
-                                n3 = float.Parse(tokens[3], System.Globalization.CultureInfo.InvariantCulture), // always a dot, never comma
+                                n1 = float.Parse(tokens[1], CultureInfo.InvariantCulture), // always a dot, never comma
+                                n2 = float.Parse(tokens[2], CultureInfo.InvariantCulture), // always a dot, never comma
+                                n3 = float.Parse(tokens[3], CultureInfo.InvariantCulture), // always a dot, never comma
                             };
                             if (sketchupMode)
                             {
@@ -393,7 +494,7 @@ namespace ConsoleApp5
                             float[] localU = new float[3], localV = new float[3];
                             for (int i = 0; i < 3; i++)
                             {
-                                string[] subTokens = tokens[i+1].Split('/');
+                                string[] subTokens = tokens[i + 1].Split('/');
                                 if (subTokens.Length < 1)
                                 {
                                     Console.WriteLine($"Error: Face with no coordinate {i}");
@@ -440,7 +541,7 @@ namespace ConsoleApp5
                                 };
                                 faces.Add(f);
                             }
-                            catch(Exception ex)
+                            catch (Exception ex)
                             {
                                 Console.WriteLine($"Error while creating display lists: {curMat} material does not exist or is bad.");
                                 Environment.Exit(1);
@@ -455,10 +556,17 @@ namespace ConsoleApp5
                 }
             };
 
+            Console.WriteLine("Loaded obj file. Reading vertex colors if applicable...");
+            if (vertexColorFileName.Length > 0)
+            {
+                ReadVertexColorFile(vertexColorFileName);
+            }
+            else Console.WriteLine("No vertex colors specified.");
+
             // Loaded in everything, let's write it!
-            Console.WriteLine("Loaded obj file, writing collision...");
+            Console.WriteLine("Writing collision...");
             string outName = "output";
-            if (args.Length>1)
+            if (args.Length > 1)
             {
                 outName = StringToGoodCName(args[1]);
             }
@@ -468,18 +576,34 @@ namespace ConsoleApp5
 
             //string curMatName = "";
 
-            string unlitMaterialNameShouldContain = "fence";
+            string[] unlitMaterialNames = new string[] { "fence", "unlit", "nolit" };
+            string[] doubleSideMaterialNames = new string[] { "fence", "twoside" };
+            string[] lavaMaterialNames = new string[] { "lava" };
+            string[] slipperyMaterialNames = new string[] { "slip" };
+            string[] noCollideMaterialNames = new string[] { "nocoll", "fake", "visonly", "visual" };
+            string[] noVisualMaterialNames = new string[] { "novis", "collonly", "collision" };
+            string[] deathBarrierMatNames = new string[] { "deathplane" };
+            string[] ia16MatNames = new string[] { "ia16" };
             bool evenMakeUnlitMatls = true;
-            
+
             string s = $"// Written by EasyExporter V{version} (C) 2020-2021 iProgramInCpp.\n\nconst Collision {outName}_collision[] = {{";
             s += $"\n\tCOL_INIT(),\n\tCOL_VERTEX_INIT({vertices.Count}),\n";
-            foreach(Vertex v in vertices)
+            foreach (Vertex v in vertices)
             {
                 s += $"\tCOL_VERTEX({(int)(v.x * scale)},{(int)(v.y * scale)},{(int)(v.z * scale)}),\n";
             }
 
             foreach (var v in materials)
             {
+                string matType = "SURFACE_DEFAULT";
+                string header = "", end = "";
+
+                //if (unlitMaterialNames.Contains(v.Value.name))
+                if (DoesStringContainAnyOfTheseSubstrings(v.Value.name, lavaMaterialNames     )) matType = "SURFACE_BURNING";
+                if (DoesStringContainAnyOfTheseSubstrings(v.Value.name, deathBarrierMatNames  )) matType = "SURFACE_DEATH_PLANE";
+                if (DoesStringContainAnyOfTheseSubstrings(v.Value.name, slipperyMaterialNames )) matType = "SURFACE_SLIPPERY";
+                if (DoesStringContainAnyOfTheseSubstrings(v.Value.name, noCollideMaterialNames)) { matType = "SURFACE_SLIPPERY"; header = "/*"; end = "*/"; }
+
                 LogVerbose("Writing collision for " + v.Value.name + ".");
                 string s2 = ""; int mtlCnt = 0;
                 foreach (Face f in faces)
@@ -490,7 +614,7 @@ namespace ConsoleApp5
                         mtlCnt++;
                     }
                 }
-                s += $"\t// {v.Value.name} Material...\n\tCOL_TRI_INIT(SURFACE_DEFAULT, {mtlCnt}),\n" + s2;
+                s += $"\t// {v.Value.name} Material...\n\t"+header+$"COL_TRI_INIT({matType}, {mtlCnt}),\n" + s2+end;
             }
 
             s += "\tCOL_TRI_STOP(),\n\tCOL_END(),\n};";
@@ -499,7 +623,18 @@ namespace ConsoleApp5
 
 
             Console.WriteLine("Wrote collision of {0} verts and {1} tris, writing display list data...", vertices.Count, faces.Count);
-            s += $"// Written by EasyExporter V{version} (C) 2020-2021 iProgramInCpp.\n\nstatic const Lights1 {outName}_lights = gdSPDefLights1(0x3f,0x3f,0x3f,0xff,0xff,0xff,0x28,0x28,0x28);\n";
+            s += $"// Written by EasyExporter V{version} (C) 2020-2021 iProgramInCpp.\n\n";
+            s += $"static const Lights1 {outName}_lights[] = {{\n";// gdSPDefLights1(0x3f,0x3f,0x3f,0xff,0xff,0xff,0x28,0x28,0x28);\n";
+            s += "\t//             ambient R G B    diffuse R G B    light dir\n";
+            int lol = 0;
+            foreach (Light l in lights)
+            {
+                s += $"\tgdSPDefLights1(0x{l.ambR:X2},0x{l.ambG:X2},0x{l.ambB:X2},  0x{l.difR:X2},0x{l.difG:X2},0x{l.difB:X2},  0x{l.dirX:X2},0x{l.dirY:X2},0x{l.dirZ:X2})";
+                lol++;
+                if (lol != lights.Count) s += ",";
+                s += "\n";
+            }
+            s += "};\n";
             s += $"static const Vtx {outName}_vertices[] = {{\n";
             int vtxIndex = 0;
             LogVerbose("Writing vertex data...");
@@ -511,8 +646,8 @@ namespace ConsoleApp5
 
                 // get the 3 verts
                 Face f = faces[i];
-                Vertex[] v = new Vertex[3]; 
-                VertexTexCoord16b[] vt = new VertexTexCoord16b[3]; 
+                Vertex[] v = new Vertex[3];
+                VertexTexCoord16b[] vt = new VertexTexCoord16b[3];
                 byte[] vn = new byte[9];
                 for (int j = 0; j < 3; j++)
                 {
@@ -522,11 +657,11 @@ namespace ConsoleApp5
                     vn[j * 3 + 1] = (byte)(127 * (normalVertices[f.vn[j]]).n2);
                     vn[j * 3 + 2] = (byte)(127 * (normalVertices[f.vn[j]]).n3);
                     //Console.WriteLine(curMat);
-                    if (f.mat.name.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
+                    if (DoesStringContainAnyOfTheseSubstrings(f.mat.name, unlitMaterialNames) && evenMakeUnlitMatls) //! hardcoded for now
                     {
-                        vn[j * 3 + 0] = 255;
-                        vn[j * 3 + 1] = 255;
-                        vn[j * 3 + 2] = 255;
+                        vn[j * 3 + 0] = (byte)vertices[f.v[j]].r;
+                        vn[j * 3 + 1] = (byte)vertices[f.v[j]].g;
+                        vn[j * 3 + 2] = (byte)vertices[f.v[j]].b;
                     }
                 }
 
@@ -648,14 +783,14 @@ namespace ConsoleApp5
                     } while (coordsThatNeedFixing != 0 && iterCount > 0);
                     //goto fixedOverflowAlready;
                 }
-            skipOverflowFix:
+                skipOverflowFix:
 
                 if (iterCount <= 0)
                 {
                     Console.WriteLine("Severe warning: trying to fix UV overflow resulted in an infinite loop. Please fix your model.");
                 }
 
-            //fixedOverflowAlready:
+                //fixedOverflowAlready:
                 for (int j = 0; j < 3; j++)
                 {
                     VertexTexCoord vtc = new VertexTexCoord();
@@ -664,7 +799,7 @@ namespace ConsoleApp5
                         vtc.u = f.localU[j];
                         vtc.v = f.localV[j];
                     }
-                    vt[j] = ConvertUVToFixed16b(vtc/*f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]]*/, f.mat.image.Width, f.mat.image.Height);
+                    vt[j] = ConvertUVToFixed16b(vtc/*f.vt[j] == -1 ? new VertexTexCoord() : texCoordVertices[f.vt[j]]*/, f.mat.image.Width, f.mat.image.Height, precise);
                     s += $"\t{{{{{{ {v[j].x * scale},\t{v[j].y * scale},\t{v[j].z * scale}\t }}, 0, {{\t {vt[j].u},\t{vt[j].v} }}, {{ \t{vn[j * 3 + 0]},\t{vn[j * 3 + 1]},\t{vn[j * 3 + 2]},\t{0xff} }} }} }},\n";
                 }
 
@@ -681,8 +816,8 @@ namespace ConsoleApp5
                 */
                 //s += $"\t{{{{{{ {v.x * scale},{v.y * scale},{v.z * scale} }}, 0, {{ {vt.u},{vt.v} }}, {{ {vtn1},{vtn2},{vtn3},{0xff} }} }} }},\n";
             }
-			
-			//!TODO: move to using StringBuilder, makes it faster and abuses GC less
+
+            //!TODO: move to using StringBuilder, makes it faster and abuses GC less
             s += "};\n\n";
 
             LogVerbose("Separating each material used in the mesh into its own display list...");
@@ -691,6 +826,8 @@ namespace ConsoleApp5
             foreach (var materialKvp in materials)
             {
                 if (materialKvp.Value.image == null) continue; // color only isnt supported!
+                if (DoesStringContainAnyOfTheseSubstrings(materialKvp.Value.name, noVisualMaterialNames)) continue;
+                bool isIA16 = DoesStringContainAnyOfTheseSubstrings(materialKvp.Value.name, ia16MatNames);
                 LogVerbose("Writing texture " + materialKvp.Value.name);
                 string goodMatName = StringToGoodCName(materialKvp.Key); // name
                 // export texture
@@ -699,10 +836,11 @@ namespace ConsoleApp5
 
                 StringBuilder stringBuilder = new StringBuilder(8192);
                 s += "ALIGNED8 const u16 " + goodMatName + "_txt[] = {\n\t";
-                for (int j = 0; j < materialKvp.Value.image.Height; j++) {
+                for (int j = 0; j < materialKvp.Value.image.Height; j++)
+                {
                     for (int e = 0; e < materialKvp.Value.image.Width; e++)
                     {
-                        stringBuilder.Append($"{ColorToRGBA16(materialKvp.Value.image.GetPixel(e,j))}, ");
+                        stringBuilder.Append($"{(isIA16 ? ColorToIA16(materialKvp.Value.image.GetPixel(e,j)) : ColorToRGBA16(materialKvp.Value.image.GetPixel(e, j)))}, ");
                         pixels_written++;
                     }
                     if (g_isVerbose)
@@ -715,17 +853,20 @@ namespace ConsoleApp5
 
                 LogVerbose("Writing display list for the material...");
 
-                s += $"static const Gfx {outName}_draw_{goodMatName}_txt[] = {{\n"; 
-                s += $"\tgsDPSetTextureImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, {goodMatName}_txt),\n"; 
-                s += $"\tgsDPLoadSync(),\n"; 
-                s += $"\tgsDPLoadBlock(G_TX_LOADTILE, 0, 0, {materialKvp.Value.image.Width} * {materialKvp.Value.image.Height} - 1, CALC_DXT({materialKvp.Value.image.Width}, G_IM_SIZ_16b_BYTES)),\n"; 
-                s += $"\tgsSPLight(&{outName}_lights.l, 1),\n"; 
-                s += $"\tgsSPLight(&{outName}_lights.a, 2),\n"; 
+                s += $"static const Gfx {outName}_draw_{goodMatName}_txt[] = {{\n";
+                s += $"\tgsDPSetTextureImage(G_IM_FMT_{(isIA16 ? "IA" : "RGBA")}, G_IM_SIZ_16b, 1, {goodMatName}_txt),\n";
+                s += $"\tgsDPLoadSync(),\n";
+                s += $"\tgsDPLoadBlock(G_TX_LOADTILE, 0, 0, {materialKvp.Value.image.Width} * {materialKvp.Value.image.Height} - 1, CALC_DXT({materialKvp.Value.image.Width}, G_IM_SIZ_16b_BYTES)),\n";
+                s += $"\tgsSPLight(&{outName}_lights[{materialKvp.Value.lightIndex}].l, 1),\n";
+                s += $"\tgsSPLight(&{outName}_lights[{materialKvp.Value.lightIndex}].a, 2),\n";
                 s += $"\t\n";
-                if (materialKvp.Key.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
+                if (DoesStringContainAnyOfTheseSubstrings(materialKvp.Key, unlitMaterialNames) && evenMakeUnlitMatls) //! hardcoded for now
+                {
+                    s += $"\tgsSPClearGeometryMode(G_LIGHTING),\n";
+                }
+                if (DoesStringContainAnyOfTheseSubstrings(materialKvp.Key, doubleSideMaterialNames) && evenMakeUnlitMatls) //! hardcoded for now
                 {
                     s += $"\tgsSPClearGeometryMode(G_CULL_BACK),\n";
-                    s += $"\tgsSPClearGeometryMode(G_LIGHTING),\n";
                 }
                 s += $"\t\n";
                 /*
@@ -734,7 +875,7 @@ namespace ConsoleApp5
                 s += $"\tgsDPLoadBlock(G_TX_LOADTILE, 0, 0, {materialKvp.Value.image.Width} * {materialKvp.Value.image.Height} - 1, CALC_DXT({materialKvp.Value.image.Width}, G_IM_SIZ_16b_BYTES)),\n";*/
                 int faceCount = 0;
                 int faceStart = -1, eeai = 0;
-                foreach(Face f in faces)
+                foreach (Face f in faces)
                 {
                     if (f.mat.name == materialKvp.Value.name)
                     {
@@ -769,12 +910,15 @@ namespace ConsoleApp5
                                 s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
                             }
                         }
-                        Face first_face2 = faces[i * 5 + faceStart];
-                        s += $"\tgsSPVertex(&{outName}_vertices[{first_face2.cachedVInsideCode}], 15, 0),\n";
-                        for (int j = 0; j < leftover; j++)
+                        if (leftover != 0)
                         {
-                            Face f = faces[i * 5 + j + faceStart];
-                            s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
+                            Face first_face2 = faces[i * 5 + faceStart];
+                            s += $"\tgsSPVertex(&{outName}_vertices[{first_face2.cachedVInsideCode}], 15, 0),\n";
+                            for (int j = 0; j < leftover; j++)
+                            {
+                                Face f = faces[i * 5 + j + faceStart];
+                                s += $"\tgsSP1Triangle({0 + j * 3},{1 + j * 3},{2 + j * 3},0x0),\n";
+                            }
                         }
                     }
                     else
@@ -783,10 +927,13 @@ namespace ConsoleApp5
                     }
                 }
                 s += $"\t\n";
-                if (materialKvp.Key.ToLower().Contains(unlitMaterialNameShouldContain) && evenMakeUnlitMatls) //! hardcoded for now
+                if (DoesStringContainAnyOfTheseSubstrings(materialKvp.Key, unlitMaterialNames) && evenMakeUnlitMatls) //! hardcoded for now
+                {
+                    s += $"\tgsSPSetGeometryMode(G_LIGHTING),\n";
+                }
+                if (DoesStringContainAnyOfTheseSubstrings(materialKvp.Key, doubleSideMaterialNames) && evenMakeUnlitMatls) //! hardcoded for now
                 {
                     s += $"\tgsSPSetGeometryMode(G_CULL_BACK),\n";
-                    s += $"\tgsSPSetGeometryMode(G_LIGHTING),\n";
                 }
                 s += $"\t\n";
                 s += $"\tgsSPEndDisplayList(),\n}};\n\n";
@@ -831,7 +978,8 @@ namespace ConsoleApp5
                 if (materialKvp.Value.image == null) continue; // color only isnt supported!
                 string goodMatName = StringToGoodCName(materialKvp.Key); // name
                 s += $"\tgsDPTileSync(),\n";
-                s += $"\tgsDPSetTile(G_IM_FMT_RGBA, G_IM_SIZ_16b, {materialKvp.Value.image.Width / 4}, 0, G_TX_RENDERTILE, 0, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Height)}, G_TX_NOLOD, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Width)}, G_TX_NOLOD),\n";
+                bool isIA16 = DoesStringContainAnyOfTheseSubstrings(materialKvp.Value.name, ia16MatNames);
+                s += $"\tgsDPSetTile(G_IM_FMT_{(isIA16?"IA":"RGBA")}, G_IM_SIZ_16b, {materialKvp.Value.image.Width / 4}, 0, G_TX_RENDERTILE, 0, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Height)}, G_TX_NOLOD, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Width)}, G_TX_NOLOD),\n";
                 s += $"\tgsDPSetTileSize(0, 0, 0, ({materialKvp.Value.image.Width} - 1) << G_TEXTURE_IMAGE_FRAC, ({materialKvp.Value.image.Height} - 1) << G_TEXTURE_IMAGE_FRAC),\n"; // todo image width-height
                 //s += $"\t\n";
                 s += $"\tgsSPDisplayList({outName}_draw_{goodMatName}_txt),\n";
@@ -856,7 +1004,8 @@ namespace ConsoleApp5
                 if (materialKvp.Value.image == null) continue; // color only isnt supported!
                 string goodMatName = StringToGoodCName(materialKvp.Key); // name
                 s += $"\tgsDPTileSync(),\n";
-                s += $"\tgsDPSetTile(G_IM_FMT_RGBA, G_IM_SIZ_16b, {materialKvp.Value.image.Width / 4}, 0, G_TX_RENDERTILE, 0, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Height)}, G_TX_NOLOD, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Width)}, G_TX_NOLOD),\n";
+                bool isIA16 = DoesStringContainAnyOfTheseSubstrings(materialKvp.Value.name, ia16MatNames);
+                s += $"\tgsDPSetTile(G_IM_FMT_{(isIA16 ? "IA" : "RGBA")}, G_IM_SIZ_16b, {materialKvp.Value.image.Width / 4}, 0, G_TX_RENDERTILE, 0, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Height)}, G_TX_NOLOD, G_TX_WRAP | G_TX_NOMIRROR, {GetPO2(materialKvp.Value.image.Width)}, G_TX_NOLOD),\n";
                 s += $"\tgsDPSetTileSize(0, 0, 0, ({materialKvp.Value.image.Width} - 1) << G_TEXTURE_IMAGE_FRAC, ({materialKvp.Value.image.Height} - 1) << G_TEXTURE_IMAGE_FRAC),\n"; // todo image width-height
                 //s += $"\t\n";
                 s += $"\tgsSPDisplayList({outName}_draw_{goodMatName}_txt),\n";
