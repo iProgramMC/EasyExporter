@@ -1,21 +1,24 @@
 # EasyExporter
-This is a level exporter for *Super Mario 64*. Requires SM64 decomp and a knowledge of how levels work.
+This is a level exporter for *Super Mario 64*. This converts OBJ files into a format that can (essentially) just be dropped in to an SM64 decomp
+repository. It requires some knowledge of how levels work.
+
 **NOTE**: This is not as easy as the title says. I decided to keep it because it would break existing links, though.
 
 ## TODOs/Issues:
 - The model does not automatically triangulate models. If you have N-gons, the tool will always pick the first 3 vertices in the n-gon, as defined in the obj
-- Does not support other model formats
-- The tool does not support non-PoT textures
+- Does not support model formats other than OBJ
+- The tool does not support textures whose width and height are not powers of 2.
 - The tool does not like huge textures, it takes a long time to convert them to text
-- The tool does not resize images automatically to fit into the n64's constraints (to 64x32, for example)
-- No automatic level folder generation, although it might be coming soon
-- You have to edit collision stuff manually, which is kind of a pain
-
-### Note about this
-I might make a gui version of this tool at some point, if I have time, which fixes the last 2 issues
+- The tool does not resize images automatically to fit into the N64's constraints (to 64x32, for example)
+- The tool does not use CI4/CI8 texture modes
+- The tool exports textures in u16 format, not u8, so models exported may not work on SM64 source ports
+- The tool does not include converted PNG files, but embeds them directly in the model file
+- No automatic level folder generation
+- To change the collision of a model, aside from a few cases built into the tool based on the material's name, manual editing of the output collision file is required.
 
 ## Warning
-If you do not know how a level is structured, please use Fast64 instead. This is meant as a more advanced version, and you will need to do a lot of stuff manually.
+If you do not know how a level is structured, please use Fast64 instead. This was designed for more intricate level replacement operations,
+and you will need to do a lot of stuff manually.
 
 ## How it works
 This takes any \*.obj file and converts it into a usable format for decomp.
@@ -36,7 +39,9 @@ Example usage: `convert my_new_level.obj course -fe`. The tool will generate two
 
 `-noscale`.. You know what it does. If you made the model at the native SM64 scale (so 1 unit in your modelling program equals 1 unit in game) you can use this to keep the scaling native. 
 
-Note that if you have scaling that isn't 100 or 1, you will have to resize your model to be in one of these scaling. I might add a scale param soon, but I'm not sure.
+`-f64s`. Sets the scaling factor to the default scaling factor of Fast64.
+
+Note that if the model is made for a scaling factor that isn't 100 or 1, you will have to resize your model to be in one of these scaling.
 
 The output name must be specified for `-sum` to work. It may only have characters from `A-Z`, `a-z`, `0-9` and `_` and may not start with a digit.
 
@@ -44,7 +49,8 @@ Afterwards, you will see a few new files:
 `<file>_outputCollision.inc.c`
 `<file>_outputModel.inc.c`
 
-To replace a level with the newly created file, simply paste the contents into `levels/<your level>/areas/<your area>/collision.inc.c` and `levels/<your level>/areas/<your area>/1/model.inc.c` respectively. But don't build yet! There's more.
+To replace a level with the newly created file, simply paste the contents into `levels/<your level>/areas/<your area>/collision.inc.c` and `levels/<your level>/areas/<your area>/1/model.inc.c`
+respectively. But don't build yet! There's more.
 
 ### Geo Layouts
 Usually, the exporter creates two display lists: `<output>_main_display_list_opaque` and `<output>_main_display_list_alpha`. The way I use it usually is just replacing what the level geo draws to my stuff, and that's what I recommend. However, if you'd like to start from scratch, here's an example, which replaces CotMC with your custom level, and uses `output` as its name.
@@ -67,8 +73,8 @@ const GeoLayout cotmc_geo_0001A0[] = {
          GEO_OPEN_NODE(),
             GEO_CAMERA(16, 0, 2000, 6000, 0, 0, 0, geo_camera_main),
             GEO_OPEN_NODE(),
-               GEO_DISPLAY_LIST(LAYER_OPAQUE, output_main_display_list_opaque),
-               GEO_DISPLAY_LIST(LAYER_ALPHA, output_main_display_list_alpha),
+               GEO_DISPLAY_LIST(LAYER_OPAQUE, output_main_display_list_opaque), // <-+- We're including our own stuff
+               GEO_DISPLAY_LIST(LAYER_ALPHA, output_main_display_list_alpha),   // <-+
                GEO_RENDER_OBJ(),
                GEO_ASM(0, geo_envfx_main),
             GEO_CLOSE_NODE(),
@@ -80,10 +86,12 @@ const GeoLayout cotmc_geo_0001A0[] = {
 ```
 
 ### Level script
-We're still not done! One more thing... change the line where `TERRAIN()` is (in the desired area, of course) to `<outputname>_collision` in `levels/<your level>/script.c` and change the previous name that there was to the new name in `header.h`.
+We're still not done! One more thing... change the line where `TERRAIN()` is (in the desired area, of course) to `<outputname>_collision` in
+`levels/<your level>/script.c` and change the previous name that there was to the new name in `header.h`.
 
 ### Notes
-This level exporter is very flexible. Although you will have to do a lot of things manually, you can convert any \*.obj file into format for SM64.
+This level exporter is very flexible, although you will have to do a lot of things manually.
 
 ### Messed up UVs ingame?
-Try keeping the `-fe` switch on. If that doesn't work, you will have to work on fixing the model, sorry!
+Unless you've used `-nuf` (in which case, try removing it), it's most likely a problem with the source model itself. If you're using faces that are really
+long or the UV shows the texture too many times over, the UV coordinates may overflow and the UV may look stretched.
